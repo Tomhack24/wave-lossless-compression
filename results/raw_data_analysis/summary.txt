@@ -1,0 +1,7 @@
+samples: 3932160
+duration_seconds: 60.00
+sample_rate_hz: 65536
+mean: 125.89
+std: 7.50
+min: 0
+max: 255
