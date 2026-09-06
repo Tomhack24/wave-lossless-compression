@@ -26,7 +26,7 @@ DATA_PATH = Path("data/wave_2026.dat")
 RESULTS_DIR = Path("results/compression_evaluation")
 REPORT_PATH = Path("report/compression_report.md")
 
-BLOCK_SIZES = [256, 1024, 4096, 16384, 65536]
+BLOCK_SIZES = [256, 1024, 4096, 16384, 65536, 3932160]
 PREDICTOR_MODES = {
     "raw": ("raw",),
     "diff1": ("diff1",),

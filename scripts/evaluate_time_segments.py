@@ -1,4 +1,3 @@
-import bz2
 import csv
 import os
 import sys
@@ -41,25 +40,22 @@ def evaluate_segments(data: np.ndarray) -> list[dict]:
     for i in range(n_segments):
         segment = data[i * SEGMENT_SIZE : (i + 1) * SEGMENT_SIZE]
 
-        payload, stats = codec.compress(segment, block_size=BLOCK_SIZE, predictors=PREDICTORS)
-        restored = codec.decompress(payload)
-        if not np.array_equal(segment, restored):
-            raise AssertionError(f"roundtrip mismatch at segment {i}")
+        row = {
+            "segment_index": i,
+            "t_start": i * SEGMENT_SECONDS,
+            "t_end": (i + 1) * SEGMENT_SECONDS,
+            "mean": float(segment.mean()),
+            "std": float(segment.std()),
+        }
 
-        bz2_bytes = len(bz2.compress(segment.tobytes(), compresslevel=9))
+        for predictor in PREDICTORS:
+            payload, stats = codec.compress(segment, block_size=BLOCK_SIZE, predictors=(predictor,))
+            restored = codec.decompress(payload)
+            if not np.array_equal(segment, restored):
+                raise AssertionError(f"roundtrip mismatch at segment {i}, predictor={predictor}")
+            row[f"{predictor}_ratio"] = stats.ratio
 
-        rows.append(
-            {
-                "segment_index": i,
-                "t_start": i * SEGMENT_SECONDS,
-                "t_end": (i + 1) * SEGMENT_SECONDS,
-                "mean": float(segment.mean()),
-                "std": float(segment.std()),
-                "wlc_ratio": stats.ratio,
-                "wlc_bits_per_sample": stats.bits_per_sample,
-                "bz2_ratio": segment.size / bz2_bytes,
-            }
-        )
+        rows.append(row)
     return rows
 
 
@@ -74,24 +70,18 @@ def write_csv(rows: list[dict], path: Path) -> None:
 
 def plot_results(rows: list[dict], path: Path) -> None:
     t = [r["t_start"] for r in rows]
-    wlc_ratio = [r["wlc_ratio"] for r in rows]
-    bz2_ratio = [r["bz2_ratio"] for r in rows]
-    std = [r["std"] for r in rows]
 
-    fig, (ax_ratio, ax_std) = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+    fig, ax_ratio = plt.subplots(figsize=(12, 4))
 
-    ax_ratio.plot(t, wlc_ratio, marker="o", markersize=3, label="wlc/adaptive (proposed)", color="#4C72B0")
-    ax_ratio.plot(t, bz2_ratio, marker="o", markersize=3, label="bz2 (general-purpose)", color="#888888")
+    for predictor in PREDICTORS:
+        ratio = [r[f"{predictor}_ratio"] for r in rows]
+        ax_ratio.plot(t, ratio, marker="o", markersize=3, label=predictor)
+
+    ax_ratio.set_xlabel("Time [s]")
     ax_ratio.set_ylabel("compression ratio")
     ax_ratio.set_title(f"compression ratio per {SEGMENT_SECONDS:g}s segment (60 segments)")
     ax_ratio.legend()
     ax_ratio.grid(True, alpha=0.3)
-
-    ax_std.fill_between(t, std, color="steelblue", alpha=0.7)
-    ax_std.set_xlabel("Time [s]")
-    ax_std.set_ylabel("amplitude std [uint8]")
-    ax_std.set_title("segment amplitude std (activity level)")
-    ax_std.grid(True, alpha=0.3)
 
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,13 +95,15 @@ def main() -> None:
 
     rows = evaluate_segments(data)
 
-    ratios = [r["wlc_ratio"] for r in rows]
     stds = [r["std"] for r in rows]
-    correlation = float(np.corrcoef(ratios, stds)[0, 1])
-
     print(f"segments: {len(rows)} x {SEGMENT_SECONDS:g}s")
-    print(f"wlc/adaptive ratio: min={min(ratios):.3f} max={max(ratios):.3f} mean={np.mean(ratios):.3f}")
-    print(f"correlation(ratio, std) = {correlation:.3f}")
+    for predictor in PREDICTORS:
+        ratios = [r[f"{predictor}_ratio"] for r in rows]
+        correlation = float(np.corrcoef(ratios, stds)[0, 1])
+        print(
+            f"{predictor:8s} ratio: min={min(ratios):.3f} max={max(ratios):.3f} "
+            f"mean={np.mean(ratios):.3f}  correlation(ratio, std)={correlation:.3f}"
+        )
 
     write_csv(rows, RESULTS_DIR / "time_segments.csv")
     plot_results(rows, RESULTS_DIR / "ratio_vs_time.png")
